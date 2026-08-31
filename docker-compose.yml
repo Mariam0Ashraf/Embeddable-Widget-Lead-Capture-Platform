@@ -39,6 +39,15 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       DEMO_SITE_ORIGIN: http://localhost:5500
+      # Overridable from the shell so the graded probes can be run against the
+      # container without editing this file, e.g.
+      #   GEO_PROVIDER_A_MODE=down docker compose up -d api
+      #   SIDE_EFFECT_TRANSPORT=fail docker compose up -d api
+      GEO_PROVIDER_A_MODE: ${GEO_PROVIDER_A_MODE:-live}
+      GEO_PROVIDER_B_MODE: ${GEO_PROVIDER_B_MODE:-live}
+      SIDE_EFFECT_TRANSPORT: ${SIDE_EFFECT_TRANSPORT:-console}
+      RATE_LIMIT_MAX_PER_IP: ${RATE_LIMIT_MAX_PER_IP:-20}
+      SPAM_MIN_FILL_MS: ${SPAM_MIN_FILL_MS:-1200}
     ports:
       - "3000:3000"
     volumes:
