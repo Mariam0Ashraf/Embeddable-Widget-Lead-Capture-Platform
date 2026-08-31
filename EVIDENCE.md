@@ -107,7 +107,7 @@ B total: 0 | A total: 1
 200 title= Newsletter signup version= 1 origins= ["http://localhost:5500"]
 ```
 
-Submission-side isolation is proven in the dashboard section, once submissions exist.
+Submission-side isolation is proven under *Owner dashboard* below, once submissions exist.
 
 - [x] **Embed snippet generated per widget.**
 
@@ -436,6 +436,93 @@ above is the transport failing, not the worker being broken:
 $ SIDE_EFFECT_TRANSPORT=console node ...
 {"level":"info","message":"side effect delivered","job_id":"56cf355f-...","transport":"console"}
 outcome: {"claimed":1,"done":1,"retried":0,"failed":0}
+```
+
+## Owner dashboard
+
+Not a numbered checkbox in Section 6, but it is moving part 6 of the brief and it
+carries the submission half of the tenant-isolation proof.
+
+**Listing, filtering and pagination** — all tenant-scoped:
+
+```
+--- GET /api/submissions — paginated, tenant-scoped ---
+200 pagination: {"total":11,"limit":3,"offset":0,"has_more":true}
+  2026-08-31T09:44:09.569Z  Talk to us           {"email":"dash-…-c@example.com","message":"Whole…  geo=unavailable
+  2026-08-31T09:44:09.546Z  Join the roast list  {"name":"Lead 0","email":"dash-…-0@example.com",  geo=unavailable
+  2026-08-31T09:44:08.925Z  Talk to us           {"email":"dash-…-c@example.com","message":"Whole…  geo=enriched
+
+--- GET /api/submissions?widget_id=… — filtered ---
+200 total for that widget: 3
+
+--- GET /api/submissions/:id — single ---
+200 {"id":"2795a4ae-…","widget":"Talk to us","geo_status":"unavailable"}
+```
+
+**Aggregations** — `GET /api/stats/overview?days=7`:
+
+```
+totals      : {"submissions":11,"widgets":2,"enriched":8,"enrichment_rate":72.7}
+by_day      : [{"day":"2026-08-29","count":0},{"day":"2026-08-30","count":0},
+               {"day":"2026-08-31","count":11}]   (zero-filled: a quiet day is a 0, not a gap)
+by_widget   : [{"title":"Join the roast list","count":8},{"title":"Talk to us","count":3}]
+by_country  : [{"country_code":"DE","country":"Germany","count":5},
+               {"country_code":"PT","country":"Portugal","count":3},
+               {"country_code":"unknown","country":"Unknown","count":3}]
+by_enrich   : [{"geo_status":"enriched","provider":"ip-api.com","count":5},
+               {"geo_status":"enriched","provider":"ipapi.co","count":3},
+               {"geo_status":"unavailable","provider":"none","count":2},
+               {"geo_status":"skipped","provider":"none","count":1}]
+side_effects: [{"status":"done","count":11}]
+```
+
+The `by_enrichment` block is the fallback chain visible in aggregate: five leads
+answered by provider A, three that fell through to provider B, two stored with no
+geo at all. Rows that failed enrichment are counted as `unknown` rather than
+dropped — hiding them would overstate how well enrichment works.
+
+**Tenant isolation, submission side** (the second half of the Widget-management
+box above). Tenant B holds a valid token and gets nothing:
+
+```
+B GET /api/submissions        -> 200 total: 0 rows: 0
+B GET A's submission by id    -> 404 {"error":"not_found","message":"Submission not found"}
+B GET /api/stats/overview     -> 200 totals: {"submissions":0,"widgets":0,"enriched":0,"enrichment_rate":0}
+B filters by A's widget_id    -> 200 total: 0
+```
+
+That last line is the one worth having: even when B supplies A's widget id
+explicitly as a filter, the `tenant_id = $1` clause that every dashboard query
+starts with means the filter can only ever narrow B's own rows.
+
+**Auth and validation on the dashboard:**
+
+```
+no token                      -> 401
+non-uuid submission id        -> 404   (shape-checked before Postgres sees it)
+from after to                 -> 400 [{"field":"from","message":"`from` must not be after `to`"}]
+limit=9999                    -> 400 [{"field":"limit","message":"Too big: expected number to be <=200"}]
+```
+
+**The simple table** the brief asks for, at `http://localhost:3000/dashboard/`.
+Verified by loading the real page and driving it, not by screenshot:
+
+```
+$ node scripts/dashboard-check.js
+ok    signed in, dashboard revealed
+          11  submissions
+           2  widgets
+       72.7%  geo enrichment rate
+          11  busiest day (2026-08-31)
+           0  dead-lettered confirmations
+ok    submissions table rendered 11 rows
+      When | Widget | Data | Location | IP
+      8/31/2026, 12:44:09 PM | Talk to us | {"email":"dash-…"} | unavailable      | 203.0.113.240
+      8/31/2026, 12:44:08 PM | Talk to us | {"email":"dash-…"} | Lisbon, Portugal | 203.0.113.240
+ok    per-widget table: 2 rows | by-country table: 3 rows
+      Showing 11 of 11
+
+PASS  the owner dashboard page loads, authenticates and renders the tables
 ```
 
 ## Documentation

@@ -171,3 +171,38 @@ test, which is the strongest evidence I have that it works. The check now waits 
 **A limitation I am stating rather than hiding.** jsdom is not a browser and does not enforce CORS, so
 `render-check` is not the CORS proof — the preflight transcripts are. It proves the other half: that one
 `<script>` tag on a foreign page becomes a working, submitting form.
+
+## Stage 6 — owner dashboard API
+
+**What AI did.** Wrote the dashboard repository, service, routes, and the single-file dashboard page.
+
+**What I kept.** Denormalising `tenant_id` onto the submission row, decided back in the design. Every
+dashboard query now starts its `WHERE` with `s.tenant_id = $1` and never has to join through `widgets` to
+know who owns a lead. That is what makes the isolation proof strong rather than incidental: even when
+tenant B passes tenant A's `widget_id` as an explicit filter, the filter can only narrow B's own rows.
+
+**What I changed.**
+- *The day-series was a plain `GROUP BY date_trunc`.* That silently omits days with no submissions, so a
+  chart drawn from it closes the gaps and makes a quiet week look busy. It now generates the date series
+  and left-joins, so a quiet day is a `0`.
+- *The country breakdown dropped rows whose enrichment failed.* Convenient, and dishonest: it would make
+  the geo feature look like it works far more often than it does. Failed rows are counted as `unknown`,
+  and there is a separate `by_enrichment` block that shows which provider carried each lead.
+- *`enrichment_rate` divided by the total without guarding it.* A brand-new tenant has zero submissions,
+  so the first thing they would ever see on their dashboard is `NaN%`.
+- *The generated dashboard page put the JWT in `localStorage` and built rows with `innerHTML`.* It is a
+  short-lived credential with no reason to outlive the tab, so it moved to `sessionStorage`; and the rows
+  contain submitted data from the public internet, which is the last string in this system that should
+  ever be parsed as HTML. The table builder creates nodes and sets `textContent`.
+- *A 401 left the stale page on screen.* An expired token now drops the user back to the sign-in form
+  instead of showing numbers that are no longer authorised.
+
+**Where I was wrong.** My first dashboard probe seeded its test submissions against `widgets[0]`, which
+sorts newest-first and was the *contact* widget — so every seeded submission failed validation with a 400
+for a missing `message` field, and I nearly read the resulting "total: 1" as a working dashboard. The
+lesson is the same one as Stage 5: assert on the thing you meant to create, not on the status code you
+hoped for.
+
+**On the checking scripts.** `render-check` and `dashboard-check` are committed scripts, not throwaway
+probes, precisely because `EVIDENCE.md` cites their output. A pasted transcript nobody can reproduce is
+just a screenshot in a monospace font.

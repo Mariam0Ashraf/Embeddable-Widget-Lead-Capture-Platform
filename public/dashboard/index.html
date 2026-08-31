@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Widget platform — owner dashboard</title>
+    <!--
+      The brief says "endpoints + a simple table are enough — this is a backend
+      capstone, not a frontend one". This page is exactly that: no build step, no
+      framework, no dependencies. It exists so the dashboard endpoints can be seen
+      working, and it is the same JSON a reviewer gets from curl.
+
+      The token lives in sessionStorage, not localStorage: it is a short-lived
+      credential and there is no reason for it to outlive the tab.
+    -->
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        margin: 0; padding: 32px 24px; background: #f6f7f9; color: #14181d;
+      }
+      main { max-width: 1040px; margin: 0 auto; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .sub { color: #5b6672; margin: 0 0 24px; }
+      .card {
+        background: #fff; border: 1px solid #dfe3e8; border-radius: 10px;
+        padding: 18px; margin-bottom: 18px;
+      }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+      label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #5b6672; }
+      input, select {
+        padding: 7px 9px; border: 1px solid #cbd3da; border-radius: 6px; font: inherit; min-width: 200px;
+      }
+      button {
+        padding: 8px 14px; border: 0; border-radius: 6px; background: #1f6feb;
+        color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+      }
+      button.secondary { background: #5b6672; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eceff3; vertical-align: top; }
+      th { color: #5b6672; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+      td.data { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      .tiles { display: flex; gap: 12px; flex-wrap: wrap; }
+      .tile { flex: 1 1 150px; background: #f0f3f7; border-radius: 8px; padding: 12px 14px; }
+      .tile .n { font-size: 22px; font-weight: 700; }
+      .tile .k { font-size: 12px; color: #5b6672; }
+      .bar { display: flex; align-items: center; gap: 8px; }
+      .bar i { display: block; height: 8px; background: #1f6feb; border-radius: 4px; }
+      .err { color: #b42318; }
+      .muted { color: #5b6672; }
+      .hide { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Owner dashboard</h1>
+      <p class="sub">Submissions and stats for the signed-in tenant. Everything on this page is one fetch away from the JSON a reviewer sees with curl.</p>
+
+      <section class="card" id="login-card">
+        <div class="row">
+          <div><label for="email">Email</label><input id="email" type="email" value="owner@demo.test" /></div>
+          <div><label for="password">Password</label><input id="password" type="password" value="demo-password-123" /></div>
+          <div><label for="api">API base</label><input id="api" value="http://localhost:3000" /></div>
+          <button id="login">Sign in</button>
+        </div>
+        <p id="login-msg" class="muted" style="margin:12px 0 0"></p>
+      </section>
+
+      <section id="app" class="hide">
+        <div class="card">
+          <div class="row">
+            <div><label for="widget">Widget</label><select id="widget"><option value="">All widgets</option></select></div>
+            <div><label for="days">Days</label><input id="days" type="number" value="30" min="1" max="365" style="min-width:90px" /></div>
+            <button id="refresh">Refresh</button>
+            <button id="signout" class="secondary">Sign out</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="tiles" id="tiles"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size:15px;margin:0 0 12px">Per widget</h2>
+          <table id="by-widget"></table>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size:15px;margin:0 0 12px">By country</h2>
+          <table id="by-country"></table>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size:15px;margin:0 0 12px">Recent submissions</h2>
+          <table id="submissions"></table>
+          <p id="pagination" class="muted" style="margin:12px 0 0"></p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        'use strict';
+        var $ = function (id) { return document.getElementById(id); };
+        var state = { token: sessionStorage.getItem('frw_token'), api: sessionStorage.getItem('frw_api') || 'http://localhost:3000' };
+
+        function api(path) {
+          return fetch(state.api + path, { headers: { Authorization: 'Bearer ' + state.token } }).then(function (res) {
+            // An expired token should drop you back to the sign-in form, not
+            // leave a page of stale numbers on screen.
+            if (res.status === 401) { signOut('Session expired — sign in again.'); throw new Error('unauthorized'); }
+            if (!res.ok) throw new Error(path + ' responded ' + res.status);
+            return res.json();
+          });
+        }
+
+        function table(el, columns, rows, empty) {
+          el.innerHTML = '';
+          if (!rows.length) {
+            var p = document.createElement('tbody');
+            var tr = document.createElement('tr');
+            var td = document.createElement('td');
+            td.className = 'muted'; td.colSpan = columns.length; td.textContent = empty;
+            tr.appendChild(td); p.appendChild(tr); el.appendChild(p);
+            return;
+          }
+          var head = document.createElement('thead');
+          var hr = document.createElement('tr');
+          columns.forEach(function (c) { var th = document.createElement('th'); th.textContent = c.label; hr.appendChild(th); });
+          head.appendChild(hr); el.appendChild(head);
+
+          var body = document.createElement('tbody');
+          rows.forEach(function (row) {
+            var tr = document.createElement('tr');
+            columns.forEach(function (c) {
+              var td = document.createElement('td');
+              if (c.className) td.className = c.className;
+              var value = c.render(row);
+              if (value instanceof Node) td.appendChild(value); else td.textContent = value;
+              tr.appendChild(td);
+            });
+            body.appendChild(tr);
+          });
+          el.appendChild(body);
+        }
+
+        function bar(count, max) {
+          var wrap = document.createElement('span');
+          wrap.className = 'bar';
+          var i = document.createElement('i');
+          i.style.width = Math.max(2, Math.round((count / (max || 1)) * 120)) + 'px';
+          var n = document.createElement('span');
+          n.textContent = count;
+          wrap.appendChild(i); wrap.appendChild(n);
+          return wrap;
+        }
+
+        function tile(n, k) {
+          var d = document.createElement('div'); d.className = 'tile';
+          var a = document.createElement('div'); a.className = 'n'; a.textContent = n;
+          var b = document.createElement('div'); b.className = 'k'; b.textContent = k;
+          d.appendChild(a); d.appendChild(b); return d;
+        }
+
+        function load() {
+          var widgetId = $('widget').value;
+          var days = $('days').value || 30;
+          var q = '?days=' + encodeURIComponent(days) + (widgetId ? '&widget_id=' + encodeURIComponent(widgetId) : '');
+          var sq = '?limit=25' + (widgetId ? '&widget_id=' + encodeURIComponent(widgetId) : '');
+
+          Promise.all([api('/api/stats/overview' + q), api('/api/submissions' + sq)])
+            .then(function (r) {
+              var stats = r[0], subs = r[1];
+
+              var tiles = $('tiles'); tiles.innerHTML = '';
+              tiles.appendChild(tile(stats.totals.submissions, 'submissions'));
+              tiles.appendChild(tile(stats.totals.widgets, 'widgets'));
+              tiles.appendChild(tile(stats.totals.enrichment_rate + '%', 'geo enrichment rate'));
+              var busiest = stats.by_day.reduce(function (a, b) { return b.count > a.count ? b : a; }, { count: 0, day: '—' });
+              tiles.appendChild(tile(busiest.count, 'busiest day (' + busiest.day + ')'));
+              var failed = (stats.side_effects.find(function (s) { return s.status === 'failed'; }) || { count: 0 }).count;
+              tiles.appendChild(tile(failed, 'dead-lettered confirmations'));
+
+              var maxW = Math.max.apply(null, [1].concat(stats.by_widget.map(function (w) { return w.count; })));
+              table($('by-widget'), [
+                { label: 'Widget', render: function (w) { return w.title; } },
+                { label: 'Public id', render: function (w) { return w.public_id; }, className: 'data' },
+                { label: 'Type', render: function (w) { return w.type; } },
+                { label: 'Active', render: function (w) { return w.is_active ? 'yes' : 'no'; } },
+                { label: 'Submissions', render: function (w) { return bar(w.count, maxW); } },
+                { label: 'Last', render: function (w) { return w.last_submission_at ? new Date(w.last_submission_at).toLocaleString() : '—'; } },
+              ], stats.by_widget, 'No widgets yet.');
+
+              var maxC = Math.max.apply(null, [1].concat(stats.by_country.map(function (c) { return c.count; })));
+              table($('by-country'), [
+                { label: 'Country', render: function (c) { return c.country; } },
+                { label: 'Code', render: function (c) { return c.country_code; }, className: 'data' },
+                { label: 'Submissions', render: function (c) { return bar(c.count, maxC); } },
+              ], stats.by_country, 'No submissions in range.');
+
+              table($('submissions'), [
+                { label: 'When', render: function (s) { return new Date(s.created_at).toLocaleString(); } },
+                { label: 'Widget', render: function (s) { return s.widget_title; } },
+                { label: 'Data', render: function (s) { return JSON.stringify(s.data); }, className: 'data' },
+                { label: 'Location', render: function (s) { return s.geo ? [s.geo.city, s.geo.country].filter(Boolean).join(', ') : s.geo_status; } },
+                { label: 'IP', render: function (s) { return s.ip || '—'; }, className: 'data' },
+              ], subs.data, 'No submissions yet — open the customer site and send one.');
+
+              $('pagination').textContent = 'Showing ' + subs.data.length + ' of ' + subs.pagination.total +
+                (subs.pagination.has_more ? ' (more available)' : '');
+            })
+            .catch(function (err) { if (err.message !== 'unauthorized') $('login-msg').textContent = err.message; });
+        }
+
+        function start() {
+          $('app').classList.remove('hide');
+          $('login-card').classList.add('hide');
+          api('/api/widgets').then(function (r) {
+            var select = $('widget');
+            select.innerHTML = '<option value="">All widgets</option>';
+            r.data.forEach(function (w) {
+              var o = document.createElement('option');
+              o.value = w.id; o.textContent = w.title;
+              select.appendChild(o);
+            });
+            load();
+          }).catch(function () {});
+        }
+
+        function signOut(message) {
+          sessionStorage.removeItem('frw_token');
+          state.token = null;
+          $('app').classList.add('hide');
+          $('login-card').classList.remove('hide');
+          $('login-msg').textContent = message || '';
+        }
+
+        $('login').addEventListener('click', function () {
+          state.api = $('api').value.replace(/\/+$/, '');
+          $('login-msg').className = 'muted';
+          $('login-msg').textContent = 'Signing in…';
+          fetch(state.api + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: $('email').value, password: $('password').value }),
+          })
+            .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+            .then(function (r) {
+              if (!r.ok) throw new Error(r.body.message || 'Sign in failed');
+              state.token = r.body.token;
+              sessionStorage.setItem('frw_token', state.token);
+              sessionStorage.setItem('frw_api', state.api);
+              $('login-msg').textContent = '';
+              start();
+            })
+            .catch(function (err) { $('login-msg').className = 'err'; $('login-msg').textContent = err.message; });
+        });
+
+        $('refresh').addEventListener('click', load);
+        $('widget').addEventListener('change', load);
+        $('signout').addEventListener('click', function () { signOut(''); });
+
+        if (state.token) { $('api').value = state.api; start(); }
+      })();
+    </script>
+  </body>
+</html>

@@ -15,7 +15,8 @@
     "seed": "node scripts/seed.js",
     "site": "node scripts/serve-site.js",
     "test": "vitest run",
-    "render-check": "node scripts/render-check.js"
+    "render-check": "node scripts/render-check.js",
+    "dashboard-check": "node scripts/dashboard-check.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

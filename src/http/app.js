@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config } from '../lib/config.js';
 import { requestContext } from './middleware/requestContext.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -8,6 +10,7 @@ import { widgetsRouter } from './routes/widgets.js';
 import { publicSubmissionsRouter } from './routes/publicSubmissions.js';
 import { publicCors } from './middleware/publicCors.js';
 import { widgetDeliveryRouter } from './routes/widgetDelivery.js';
+import { dashboardRouter } from './routes/dashboard.js';
 
 export function createApp() {
   const app = express();
@@ -33,6 +36,12 @@ export function createApp() {
   app.use(widgetsRouter);
   app.use(publicSubmissionsRouter);
   app.use(widgetDeliveryRouter);
+  app.use(dashboardRouter);
+
+  // The owner dashboard page. Served from the API's own origin, so it is a
+  // plain same-origin fetch with a Bearer token and no CORS involved.
+  const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
+  app.use('/dashboard', express.static(path.join(publicDir, 'dashboard'), { maxAge: 0 }));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
