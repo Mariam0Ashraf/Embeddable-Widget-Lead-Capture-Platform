@@ -1,0 +1,67 @@
+# Manifest read by the FlyRank evaluator.
+name: flyrank-capstone-widget-platform
+track: backend
+language: javascript
+framework: express
+
+run: docker compose up --build
+seed: docker compose exec api npm run seed
+test: npm test
+
+base_url: http://localhost:3000
+
+endpoints:
+  - method: GET
+    path: /health
+    auth: none
+    note: liveness + database check
+  - method: POST
+    path: /api/auth/register
+    auth: none
+  - method: POST
+    path: /api/auth/login
+    auth: none
+  - method: GET
+    path: /api/widgets
+    auth: bearer
+  - method: POST
+    path: /api/widgets
+    auth: bearer
+  - method: GET
+    path: /api/widgets/{id}
+    auth: bearer
+  - method: PATCH
+    path: /api/widgets/{id}
+    auth: bearer
+  - method: DELETE
+    path: /api/widgets/{id}
+    auth: bearer
+  - method: GET
+    path: /api/widgets/{id}/embed
+    auth: bearer
+  - method: GET
+    path: /api/submissions
+    auth: bearer
+  - method: GET
+    path: /api/stats/overview
+    auth: bearer
+  - method: GET
+    path: /widget.js
+    auth: none
+    note: loader script, short cache
+  - method: GET
+    path: /static/widget.{version}.js
+    auth: none
+    note: versioned immutable bundle
+  - method: GET
+    path: /api/public/widgets/{publicId}/config
+    auth: none
+    note: cached public config, CORS
+  - method: OPTIONS
+    path: /api/public/submissions
+    auth: none
+    note: CORS preflight
+  - method: POST
+    path: /api/public/submissions
+    auth: none
+    note: public submission, rate limited + spam filtered
