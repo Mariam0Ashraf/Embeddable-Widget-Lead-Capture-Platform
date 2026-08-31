@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: widget
+      POSTGRES_PASSWORD: widget
+      POSTGRES_DB: widgets
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U widget -d widgets"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Local mail catcher for the confirmation-email side effect.
+  # UI on http://localhost:8025 — set SIDE_EFFECT_TRANSPORT=smtp to use it.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      PUBLIC_BASE_URL: http://localhost:3000
+      DATABASE_URL: postgres://widget:widget@db:5432/widgets
+      JWT_SECRET: dev-only-secret-not-for-production
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      DEMO_SITE_ORIGIN: http://localhost:5500
+    ports:
+      - "3000:3000"
+
+volumes:
+  db_data:
