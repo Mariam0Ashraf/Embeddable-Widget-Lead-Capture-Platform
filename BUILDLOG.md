@@ -206,3 +206,91 @@ hoped for.
 **On the checking scripts.** `render-check` and `dashboard-check` are committed scripts, not throwaway
 probes, precisely because `EVIDENCE.md` cites their output. A pasted transcript nobody can reproduce is
 just a screenshot in a monospace font.
+
+## Interlude — running the stack the way a reviewer will
+
+Verifying `docker compose up` instead of `npm start` found a bug that local development
+structurally could not, plus two environment collisions worth recording.
+
+**The bug.** `docker compose exec api npm run seed` writes the customer test page with a real widget id
+baked in — into the **api** container's filesystem. The **site** container serves that page from its own
+copy of the image and would never have seen the change, so a reviewer following the README exactly would
+have seeded successfully and then stared at an unseeded demo page. Running everything on one host hides
+this completely, because there is only one filesystem. Both services now bind-mount the same
+`./public/site` directory, and the fix is verified end to end: seed in the api container, then curl the
+site container and see the real `public_id` in the HTML.
+
+**Two port collisions on this machine, neither of them the project's fault.** A native Postgres already
+owned 5432, which is why the published port moved to 5433 back in Stage 3. Oracle's TNS listener owns
+`127.0.0.1:5500`; Docker still bound `0.0.0.0:5500` successfully, so the demo site port stayed put. I
+also had `npm start` processes holding 3000 and 5500 from earlier stages, which left the api and site
+containers stuck in `Created` — worth knowing that a compose service which cannot bind its port fails
+quietly into that state rather than crashing loudly.
+
+**What this changes about how I check things.** "It works on my machine" and "it works the way the README
+says" are different claims, and only the second one is what gets graded. The remaining stages get
+verified against the compose stack, not against `npm start`.
+
+## Stage 7 — the deterministic test suite, the README, and the final self-check
+
+**What AI did.** Wrote the four test files, the vitest config and global setup, and a first draft of the
+README.
+
+**What I kept.** A separate `widgets_test` database created and migrated by `globalSetup`. The suite
+truncates and inserts freely; being one typo away from wiping the demo data a reviewer is looking at is
+not a risk worth carrying to save a config block.
+
+**What I changed.**
+- *The generated tests asserted only status codes.* A test that checks the honeypot returns 201 passes
+  just as happily against an endpoint that stores nothing at all — which is exactly the bug my Stage 5
+  render-check walked into. Every spam and side-effect test now asserts on **rows in the database**, and
+  each spam test is paired with a control proving a legitimate submission *is* stored.
+- *The rate-limit test asserted only that 429s appear.* The requirement is "429s appear **and the API
+  keeps serving legitimate traffic**" — a limiter that shed all load would pass the naive version and
+  fail the product. There is now an explicit assertion that a different address still gets 201 and
+  `/health` still answers.
+- *The fallback tests used the env modes.* `config` is frozen at import, so one process cannot exercise
+  all three provider states that way. The chain is injected instead, which made it possible to add the
+  case I actually wanted: a provider that throws *synchronously*, proving `enrichIp` has no throw path at
+  all rather than just catching rejected promises.
+- *Tests shared a tenant and an IP.* The limiters are per-process and the database is shared, so tests
+  were tripping each other's quotas. Each test now takes a fresh tenant and a fresh address.
+
+**Where the environment bit back.** `npm test` failed here with `Cannot find module
+'C:\Users\maria\Documents\NodeJS\vitest\vitest.mjs'` — npm's `.bin` shim resolution on Windows breaks on
+the `&` in this working directory's name. `npm run migrate` and `npm run seed` were unaffected because
+they are plain `node …` commands. A junction to an `&`-free path did not help, because junctions resolve
+back to the real path; the only way to be sure was to copy the project to a clean directory, install, and
+run it there: **57 passed**. Worth chasing rather than waving away, because `capstone.yaml` declares
+`test: npm test` and an evaluator would have hit the same wall if the cause had been the repository
+rather than my folder name.
+
+**On the README's limitations section.** It names nine real limitations, including ones nobody would have
+noticed: the in-memory limiter not surviving a restart or spanning replicas, only the current bundle
+version being retained, and the fill-time heuristic being skippable by a bot that simply omits
+`rendered_at`. A limitations section that says "none known" tells a reviewer the author did not look.
+
+### Stage 7 postscript — the suite passed once, then failed
+
+Re-running the suite immediately after writing it produced `1 failed | 56 passed`: *"delivers the job and
+marks it done when the transport works"* got `pending` instead of `done`.
+
+Nothing was wrong with the worker. The test called `processDueJobs({ batchSize: 50 })`, and the worker
+claims the **oldest** due jobs — by the time this file runs, the earlier test files have queued roughly
+45 of them, and the test database was carrying more from the previous run. The batch filled up with other
+people's jobs and never reached the one under test.
+
+This is the third time in this project that the same mistake has bitten me, in three different disguises:
+the Stage 4 probe that "proved" dead-lettering while watching an unclaimed job, the Stage 5 render-check
+that went green on a submission the spam filter had silently dropped, and now this. The shape is always
+the same — **asserting on an outcome that something else could also have produced.**
+
+Two fixes, deliberately at different levels:
+- `globalSetup` now truncates the test database at the start of every run, so the suite is reproducible
+  on the second run and not just the first.
+- The test itself parks every other pending job and asserts `outcome.claimed === 1`, so it can no longer
+  pass by accidentally processing somebody else's work. Raising `batchSize` would only have moved the
+  threshold.
+
+Verified by running the suite three times in a row: 57 passed, 57 passed, 57 passed. A suite that is
+green once is not a suite.

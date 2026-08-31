@@ -41,6 +41,12 @@ services:
       DEMO_SITE_ORIGIN: http://localhost:5500
     ports:
       - "3000:3000"
+    volumes:
+      # `npm run seed` writes the customer test page with a real widget id baked
+      # in. The api container writes it and the site container serves it, so the
+      # directory has to be the same directory on both — otherwise seeding
+      # succeeds and the demo page never changes.
+      - ./public/site:/app/public/site
 
   # The pretend customer website, on its own port. A different port is a
   # different origin, which is what makes every widget request cross-origin.
@@ -54,6 +60,8 @@ services:
       DATABASE_URL: postgres://widget:widget@db:5432/widgets
       JWT_SECRET: dev-only-secret-not-for-production
     command: ["npm", "run", "site"]
+    volumes:
+      - ./public/site:/app/public/site
     ports:
       - "5500:5500"
 
