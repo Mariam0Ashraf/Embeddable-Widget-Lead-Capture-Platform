@@ -87,3 +87,48 @@ user "widget"` while the container was healthy and `psql` worked *inside* it. A 
 on the host owned port 5432 and won over Docker's port proxy, so the client was talking to the wrong
 server. The container is now published on **5433**, which also means the repo will not collide on a
 reviewer's machine.
+
+## Stage 4 — the hardened submission path
+
+**What AI did.** Wrote the rate limiter, the geo provider chain, the spam checks, the submission
+validator and service, the outbox worker, and the public CORS middleware.
+
+**What I kept.** The transactional outbox. The submission row and its follow-up job are written in one
+transaction, so there is no state where we keep a lead and silently forget to email them, and the worker
+that drains it is the background job the shared requirements ask for.
+
+**What I changed, and why each one is a real bug and not a style preference.**
+
+- *CORS was registered after the body parser.* That looks harmless and is the single most misleading bug
+  in this kind of system: a 413 or a malformed-JSON 400 comes back with no `Access-Control-Allow-Origin`,
+  the browser refuses to show the response, and the customer's developer sees "blocked by CORS" for what
+  is actually a clean, correct 413. It is now mounted before `express.json`, and the evidence transcript
+  records the header on every 4xx.
+- *The origin allow-list was enforced only by the CORS header.* CORS is a browser courtesy — `curl`
+  ignores it completely — so that is not access control. The allow-list is now checked again in the
+  service layer and returns 403.
+- *Preflight was going to be answered per-widget.* It cannot be: an `OPTIONS` request has no body, so
+  there is no way to know which widget is being addressed. Preflight is answered for any origin and the
+  per-widget check happens on the POST.
+- *The generated limiter never evicted keys.* One entry per IP ever seen, forever — a leak that only
+  appears in production. Added a sweeper on an `unref`'d interval.
+- *`trust proxy` interacts with rate limiting.* With `trust proxy: true` a client can put anything in
+  `X-Forwarded-For` and get a fresh quota per forged address, which makes the per-IP limit decorative.
+  Kept at one hop.
+- *The honeypot originally returned a 400.* That tells the bot exactly which control it tripped, which is
+  free tuning information for whoever wrote it. It now returns a response indistinguishable from success
+  and stores nothing; the row count in `EVIDENCE.md` is what proves the drop.
+- *The timing heuristic treated a missing `rendered_at` as spam.* That would reject the reviewer's `curl`
+  and every server-to-server caller. It now only applies when the stamp is present, and a stamp from the
+  future is treated as forged.
+
+**Where I was wrong, not the AI.** My first worker probe claimed to prove the dead-letter path and proved
+nothing: a backlog of pending jobs from earlier probe runs filled every batch of five, so the job I was
+watching was never claimed and sat at `attempts: 0` while I read the log as success. The fix was to park
+the backlog and re-run against a single job. Worth writing down because the failure mode — a green-looking
+log that never touched the thing under test — is exactly what a careless `EVIDENCE.md` would have enshrined.
+
+**A design note I want to be able to defend.** The rate limiter is in-process memory, not Redis. For one
+API container that is exactly as correct and far easier to prove, but it means limits reset on restart and
+would not be shared across replicas. That is a real limitation, so it goes in the README's limitations
+section rather than being quietly hoped over.

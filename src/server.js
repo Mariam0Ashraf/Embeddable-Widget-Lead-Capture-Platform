@@ -2,10 +2,15 @@ import { createApp } from './http/app.js';
 import { config } from './lib/config.js';
 import { logger } from './lib/logger.js';
 import { waitForDatabase, closePool } from './lib/db.js';
+import { startSideEffectWorker } from './workers/sideEffectWorker.js';
 
 const app = createApp();
 
 await waitForDatabase();
+
+// The outbox drainer. Started after the database is reachable so its first tick
+// does not race the connection.
+const worker = config.WORKER_ENABLED ? startSideEffectWorker() : null;
 
 const server = app.listen(config.PORT, () => {
   logger.info('api listening', {
@@ -17,6 +22,7 @@ const server = app.listen(config.PORT, () => {
 
 async function shutdown(signal) {
   logger.info('shutting down', { signal });
+  worker?.stop();
   server.close(async () => {
     await closePool().catch(() => {});
     process.exit(0);

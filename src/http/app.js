@@ -5,6 +5,8 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { widgetsRouter } from './routes/widgets.js';
+import { publicSubmissionsRouter } from './routes/publicSubmissions.js';
+import { publicCors } from './middleware/publicCors.js';
 
 export function createApp() {
   const app = express();
@@ -17,11 +19,18 @@ export function createApp() {
   app.disable('etag');
 
   app.use(requestContext);
+
+  // Registered before the body parser on purpose: a 413 or a malformed-JSON 400
+  // must still carry CORS headers, or the browser hides the real status behind a
+  // generic CORS error and the customer's developer cannot debug their own form.
+  app.use('/api/public', publicCors);
+
   app.use(express.json({ limit: config.SUBMISSION_BODY_LIMIT }));
 
   app.use(healthRouter);
   app.use(authRouter);
   app.use(widgetsRouter);
+  app.use(publicSubmissionsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
