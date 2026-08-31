@@ -3,6 +3,8 @@ import { config } from '../lib/config.js';
 import { requestContext } from './middleware/requestContext.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.js';
+import { authRouter } from './routes/auth.js';
+import { widgetsRouter } from './routes/widgets.js';
 
 export function createApp() {
   const app = express();
@@ -18,6 +20,8 @@ export function createApp() {
   app.use(express.json({ limit: config.SUBMISSION_BODY_LIMIT }));
 
   app.use(healthRouter);
+  app.use(authRouter);
+  app.use(widgetsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

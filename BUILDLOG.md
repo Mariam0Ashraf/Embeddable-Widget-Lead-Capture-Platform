@@ -52,3 +52,38 @@ indexes harder to justify in a review, not easier.
 **Where I was still unsure.** `trust proxy`. Setting it to `true` trusts the entire `X-Forwarded-For`
 chain, which lets any client claim any IP and walk straight through a per-IP rate limit. I set it to `1`
 — trust exactly the one hop we actually have (Docker/compose) and no further.
+
+## Stage 3 — auth, tenant-isolated widget CRUD, embed snippet
+
+**What AI did.** Wrote the auth service, the JWT helpers, the widget repository/service/route trio, and
+the Zod schemas for widget creation and patching.
+
+**What I kept.** 404-not-403 for another tenant's widget id. A `403` tells the caller "this exists but
+isn't yours", which is a small leak across exactly the boundary the brief asks me to prove.
+
+**What I changed.**
+- The generated `login` returned early when the email was unknown. That makes the response measurably
+  faster for unregistered addresses and turns login into an account-enumeration oracle. It now compares
+  against a dummy hash and returns the identical error either way.
+- The generated `register` trusted its own "does this email exist" check. Two simultaneous registrations
+  race straight past it, so the unique index is the real guard; the `23505` violation is now translated
+  to a 409 instead of surfacing as a 500.
+- The generated route handlers passed `req.params.id` straight into SQL. A non-UUID reaches Postgres as
+  invalid input and comes back a 500 — a validation box the brief grades. Ids are shape-checked before
+  any query runs.
+- I made every widget schema `.strict()`. A silently ignored unknown key is a customer filing a bug about
+  a setting that "doesn't work" when it was never applied.
+
+**Where the AI was wrong, and the probe caught it.** `display: displaySchema.default({})` looked correct
+and passed review. It isn't: Zod's `.default()` stores the literal `{}` and never runs the inner schema,
+so every widget was persisted with an empty display object and the public config would have shipped no
+position, theme, or success message. The end-to-end probe printed `"display":{}` and gave it away.
+Changed to `.prefault({})`, which parses the value and applies the nested defaults. This is the reason I
+run a real request against a real database at the end of each stage instead of trusting the schema to
+mean what it reads like.
+
+**An environment fix, not a code fix.** `npm run migrate` failed with `password authentication failed for
+user "widget"` while the container was healthy and `psql` worked *inside* it. A Postgres already running
+on the host owned port 5432 and won over Docker's port proxy, so the client was talking to the wrong
+server. The container is now published on **5433**, which also means the repo will not collide on a
+reviewer's machine.
