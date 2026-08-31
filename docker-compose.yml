@@ -42,5 +42,20 @@ services:
     ports:
       - "3000:3000"
 
+  # The pretend customer website, on its own port. A different port is a
+  # different origin, which is what makes every widget request cross-origin.
+  site:
+    build: .
+    depends_on:
+      - api
+    environment:
+      SITE_PORT: 5500
+      # The site server needs no database; these satisfy the config schema.
+      DATABASE_URL: postgres://widget:widget@db:5432/widgets
+      JWT_SECRET: dev-only-secret-not-for-production
+    command: ["npm", "run", "site"]
+    ports:
+      - "5500:5500"
+
 volumes:
   db_data:

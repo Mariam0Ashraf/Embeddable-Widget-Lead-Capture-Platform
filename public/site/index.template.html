@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Northwind Coffee — a site the API does not control</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        margin: 0; padding: 48px 24px; background: #f6f7f9; color: #14181d;
+      }
+      main { max-width: 720px; margin: 0 auto; }
+      header { border-bottom: 1px solid #dfe3e8; padding-bottom: 20px; margin-bottom: 28px; }
+      h1 { margin: 0 0 6px; font-size: 26px; }
+      .sub { color: #5b6672; margin: 0; }
+      .note {
+        background: #fff; border: 1px solid #dfe3e8; border-left: 3px solid #1f6feb;
+        border-radius: 8px; padding: 14px 16px; margin: 24px 0; font-size: 14px;
+      }
+      code { background: #eceff3; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+      pre {
+        background: #14181d; color: #e6edf3; padding: 14px 16px; border-radius: 8px;
+        overflow-x: auto; font-size: 13px;
+      }
+      .slot { margin: 28px 0; }
+      footer { margin-top: 40px; color: #5b6672; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Northwind Coffee</h1>
+        <p class="sub">A pretend customer website. Nothing here belongs to the API.</p>
+      </header>
+
+      <div class="note">
+        <strong>What this page is for.</strong> It is served from
+        <code>http://localhost:5500</code> while the API runs on
+        <code>http://localhost:3000</code> — a different port, and therefore a
+        different <em>origin</em>. Every request the widget makes from this page is
+        cross-origin, which is the whole point: it exercises CORS, preflight, and
+        the public submission endpoint exactly the way a real customer's site would.
+      </div>
+
+      <p>
+        Beans roasted on Tuesdays. Subscribe below and we will tell you when the
+        next batch lands.
+      </p>
+
+      <!--
+        The widget mounts inside this div because the data attribute names it.
+        Remove the attribute and the widget falls back to floating over the page,
+        positioned by the owner's display settings.
+      -->
+      <div class="slot" data-flyrank-widget="REPLACE_WITH_PUBLIC_ID"></div>
+
+      <h2>The one line that does it</h2>
+      <p>This is the entire integration — the snippet the API handed the owner:</p>
+      <pre>&lt;script src="http://localhost:3000/widget.js?id=REPLACE_WITH_PUBLIC_ID" async&gt;&lt;/script&gt;</pre>
+
+      <p>
+        Open the network tab and watch the sequence: the loader arrives with a
+        short cache, it pulls the versioned bundle (cached for a year, because its
+        URL contains a hash of its own contents), the bundle fetches the widget's
+        config, and submitting fires a preflight <code>OPTIONS</code> before the
+        real <code>POST</code>.
+      </p>
+
+      <footer>
+        Not a real coffee company. Run <code>npm run seed</code> to get a widget id,
+        then paste it into the two <code>REPLACE_WITH_PUBLIC_ID</code> spots above —
+        or let the seed script write them for you.
+      </footer>
+    </main>
+
+    <!-- The embed snippet. One line, exactly as a customer would paste it. -->
+    <script src="http://localhost:3000/widget.js?id=REPLACE_WITH_PUBLIC_ID" async></script>
+  </body>
+</html>

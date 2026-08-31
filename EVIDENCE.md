@@ -121,9 +121,131 @@ Submission-side isolation is proven in the dashboard section, once submissions e
 ```
 
 ## Widget delivery
-- [ ] Public config endpoint serves a small payload with correct HTTP cache headers.
-- [ ] Widget JavaScript is served as a versioned bundle.
-- [ ] The widget renders on a page served from a different origin than the API.
+
+- [x] **Public config endpoint serves a small payload with correct HTTP cache headers.**
+
+783 bytes, and deliberately free of the tenant id, the internal widget id, and the
+origin allow-list — that last one would hand an attacker the exact `Origin` to forge:
+
+```
+$ curl -D - http://localhost:3000/api/public/widgets/xkh8gdncg4ia/config -H 'Origin: http://localhost:5500'
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: *
+Cache-Control: public, max-age=60
+ETag: W/"xkh8gdncg4ia-1"
+Content-Type: application/json; charset=utf-8
+payload bytes: 783
+
+{"public_id":"xkh8gdncg4ia","type":"signup_form","title":"Join the roast list",
+ "fields":[{"name":"email","label":"Email","type":"email","required":true, …}],
+ "button_text":"Subscribe","display":{…},"version":1,
+ "submit_url":"http://localhost:3000/api/public/submissions","honeypot_field":"_hp"}
+```
+
+A revalidating browser gets a 304 with no body:
+
+```
+$ curl -D - .../config -H 'If-None-Match: W/"xkh8gdncg4ia-1"'
+HTTP/1.1 304 Not Modified
+ETag: W/"xkh8gdncg4ia-1"
+body bytes on 304: 0
+```
+
+…and editing the widget rolls the cache over, so the stale validator stops matching:
+
+```
+$ curl -X PATCH /api/widgets/<id> -d '{"button_text":"Subscribe now"}'   -> 200
+$ curl -D - .../config                                    -> ETag: W/"xkh8gdncg4ia-2"
+$ curl -D - .../config -H 'If-None-Match: W/"xkh8gdncg4ia-1"'  -> HTTP/1.1 200 OK
+```
+
+- [x] **Widget JavaScript is served as a versioned bundle (new version = new URL).**
+
+The version token is the build number plus a hash of the bundle's own bytes, which
+is what makes `immutable` honest — change one character and the URL changes with it:
+
+```
+$ curl -D - http://localhost:3000/static/widget.v1-f9ee4db2.js
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: *
+Content-Type: application/javascript; charset=utf-8
+Cache-Control: public, max-age=31536000, immutable
+bundle bytes: 10381
+```
+
+The loader is a separate, short-lived response, so a release reaches customers
+within minutes without the bundle ever being re-fetched unnecessarily:
+
+```
+$ curl -D - "http://localhost:3000/widget.js?id=xkh8gdncg4ia"
+HTTP/1.1 200 OK
+Content-Type: application/javascript; charset=utf-8
+Cache-Control: public, max-age=300
+X-Widget-Bundle: v1-f9ee4db2
+
+(function(){ … w.queue.push("xkh8gdncg4ia");
+  s.src = "http://localhost:3000/static/widget.v1-f9ee4db2.js"; … })();
+```
+
+A loader cached just before a release can still ask for the previous URL. That
+serves current code with `no-cache` rather than a 404, so a customer's page never
+breaks mid-deploy, and nothing is ever cached under a URL that misdescribes it:
+
+```
+$ curl -D - http://localhost:3000/static/widget.v0-deadbeef.js
+HTTP/1.1 200 OK
+Cache-Control: no-cache
+X-Widget-Bundle: v1-f9ee4db2
+```
+
+- [x] **The widget renders on a page served from a different origin than the API.**
+
+`npm run render-check` loads the real customer page over HTTP from
+`http://localhost:5500`, lets jsdom execute the real `<script>` tag, and waits for
+the form to appear. Every asset comes off the wire from `http://localhost:3000`:
+
+```
+$ npm run render-check
+ok    fetched the customer page from http://localhost:5500
+ok    widget container rendered into the page
+ok    title      "Join the roast list"
+ok    button     "Subscribe now"
+ok    fields     email, name, roast, consent
+ok    honeypot   name="_hp" (offscreen, aria-hidden="true")
+ok    mounted inside the page-provided container, not floated over it
+ok    waiting 1500ms before submitting, so the fill-time heuristic sees a human
+ok    submitted cross-origin and got the success message: "You are on the list. See you Tuesday."
+
+PASS  the widget renders and submits from a second origin
+```
+
+The request sequence the API logged while that page loaded — one `<script>` tag
+becoming a working form:
+
+```
+GET     /widget.js                                    -> 200
+GET     /static/widget.v1-f9ee4db2.js                 -> 200
+GET     /api/public/widgets/xkh8gdncg4ia/config       -> 200
+POST    /api/public/submissions                       -> 201
+```
+
+And the row really landed, tagged with the origin it came from:
+
+```
+$ docker compose exec db psql -U widget -d widgets \
+    -c "SELECT data->>'email', data->>'name', origin, geo_status FROM submissions
+        WHERE data->>'email' LIKE 'render-check-%'"
+
+                 email                  |     name     |        origin         | geo_status
+----------------------------------------+--------------+-----------------------+------------
+ render-check-1788169094045@example.com | Render Check | http://localhost:5500 | skipped
+(1 row)
+```
+
+Note that jsdom does not enforce CORS, so this is not the CORS proof — the
+preflight and header transcripts under *Public submission API* are. What this
+proves is the other half: one `<script>` tag on a foreign page becomes a working,
+submitting form.
 
 ## Public submission API
 

@@ -7,6 +7,7 @@ import { authRouter } from './routes/auth.js';
 import { widgetsRouter } from './routes/widgets.js';
 import { publicSubmissionsRouter } from './routes/publicSubmissions.js';
 import { publicCors } from './middleware/publicCors.js';
+import { widgetDeliveryRouter } from './routes/widgetDelivery.js';
 
 export function createApp() {
   const app = express();
@@ -31,6 +32,7 @@ export function createApp() {
   app.use(authRouter);
   app.use(widgetsRouter);
   app.use(publicSubmissionsRouter);
+  app.use(widgetDeliveryRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

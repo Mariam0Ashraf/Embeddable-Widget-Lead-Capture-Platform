@@ -2,7 +2,7 @@
   "name": "flyrank-capstone-widget-platform",
   "version": "1.0.0",
   "private": true,
-  "description": "Embeddable widget and lead-capture platform — FlyRank backend capstone",
+  "description": "Embeddable widget and lead-capture platform \u2014 FlyRank backend capstone",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -14,7 +14,8 @@
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
     "site": "node scripts/serve-site.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "render-check": "node scripts/render-check.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -26,6 +27,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "jsdom": "^29.1.1",
     "supertest": "^7.1.4",
     "vitest": "^3.2.4"
   }

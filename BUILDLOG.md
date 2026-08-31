@@ -132,3 +132,42 @@ log that never touched the thing under test — is exactly what a careless `EVID
 API container that is exactly as correct and far easier to prove, but it means limits reset on restart and
 would not be shared across replicas. That is a real limitation, so it goes in the README's limitations
 section rather than being quietly hoped over.
+
+## Stage 5 — widget delivery: loader, versioned bundle, cached config, customer site
+
+**What AI did.** Wrote the widget bundle, the loader generator, the delivery routes, the seed script, the
+static site server, and the render check.
+
+**What I kept.** Splitting the loader from the bundle. The loader is per-widget and short-lived; the
+bundle is one immutable file shared by every widget on every site. That is the shape a CDN wants, and it
+means a release reaches customers in minutes without anyone re-downloading the payload.
+
+**What I changed.**
+- *The bundle version was going to be the `WIDGET_BUILD_VERSION` env var alone.* Then `immutable` is a
+  lie the first time somebody edits `bundle.js` and forgets to bump the number, and browsers cache stale
+  code for a year. The URL now carries a hash of the file's actual bytes, so the version cannot drift
+  from the content.
+- *A stale bundle URL was going to 404.* The loader is cached for five minutes, so for five minutes after
+  a release some pages still ask for the old URL — and a 404 there is a customer's form silently
+  disappearing. Unknown versions now serve current code with `no-cache`: the page keeps working, and
+  nothing is ever cached under a URL that misdescribes its contents.
+- *The public config was built by deleting keys from the widget row.* A deny-list leaks whatever column
+  gets added next. It is now an explicit allow-list, and it deliberately omits `allowed_origins` — 
+  publishing that would hand an attacker the exact `Origin` header to forge.
+- *The bundle used `innerHTML` for titles and labels.* Those are customer-authored strings rendered on
+  someone else's page; the bundle now builds nodes and sets `textContent`, so a customer cannot inject
+  markup into their own visitors' pages through us.
+- *The widget id was read from `document.currentScript`.* That is unreliable once a tag has been moved,
+  copied, or injected by a tag manager. The id is baked into the loader server-side instead.
+
+**Where I was wrong, and the system caught me.** The render check passed on its first run — green ticks,
+success message, `POST … -> 201` in the log — and there was **no row in the database**. The check filled
+and submitted the form in the same tick, which is precisely the definition of a bot that the fill-time
+heuristic exists to catch, so the submission was silently dropped. It looked like success because the
+spam response is *designed* to be indistinguishable from success. My own anti-spam control fooled my own
+test, which is the strongest evidence I have that it works. The check now waits out
+`SPAM_MIN_FILL_MS` before submitting, and asserts the row exists rather than trusting the 201.
+
+**A limitation I am stating rather than hiding.** jsdom is not a browser and does not enforce CORS, so
+`render-check` is not the CORS proof — the preflight transcripts are. It proves the other half: that one
+`<script>` tag on a foreign page becomes a working, submitting form.
